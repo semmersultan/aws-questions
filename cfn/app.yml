@@ -1,0 +1,231 @@
+Description: Serive NSW Apache Web Server
+
+Parameters:
+
+  Env:
+    Description: The Environment the Service is associated with
+    Type: String
+    AllowedValues: [ dev, test, preprod, prod ]
+    Default: test
+
+  BaseAMI:
+    Description: Base AMI Image ID
+    Type: String
+
+  InstanceType:
+    Description: The EC2 instance type
+    Type: String
+
+  KeyPairName:
+    Type: String
+
+  VpcId:
+    Type: String
+
+  SubnetId1:
+    Type: String
+
+  SubnetId2:
+    Type: String
+
+  FixedAlloc1:
+    Type: String
+
+  FixedIP1:
+    Type: String
+
+  FixedAlloc2:
+    Type: String
+
+  FixedIP2:
+    Type: String
+
+  BaseDNSEndpoint:
+    Type: String
+
+  SecondaryDNSEndpoint:
+    Type: String
+    Default: ''
+
+  PuppetEnv:
+    Type: String
+    Default:
+
+  SecurityGroupIds:
+    Type: CommaDelimitedList
+
+  ApacheSite1:
+      Type: String
+
+  ApacheSite2:
+      Type: String
+      Default: ''
+
+  WTSEngineServers:
+      Type: String
+
+  LiveExtLogEmailArgs:
+    Type: String
+
+  LiveIntLogEmailArgs:
+      Type: String
+
+  TestExtLogEmailArgs:
+      Type: String
+
+  TestIntLogEmailArgs:
+      Type: String
+
+  TLSProtocol:
+      Type: String
+      Default: TLSv1.2
+
+  ApacheConfig:
+      Type: String
+
+Resources:
+
+  Instance1:
+    Type: AWS::EC2::Instance
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /root/setup_cron.sh:
+              content: |
+                #!/bin/bash
+                crontab <<EOF
+                */2 * * * * /usr/local/bin/aws-scripts-mon/mon-put-instance-data.pl --mem-avail --disk-space-avail --disk-path="/" --from-cron
+                EOF
+              mode: '000700'
+              owner: root
+              group: root
+          commands:
+            1_setup_cron:
+              command: "./setup_cron.sh"
+              cwd: "/root"
+              services:
+            sysvinit:
+              awslogs:
+                enabled: true
+                ensureRunning: true
+                files:
+                - /var/awslogs/etc/proxy.conf
+    Properties:
+      IamInstanceProfile: !Ref InstanceProfile
+      ImageId: !Ref BaseAMI
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyPairName
+      BlockDeviceMappings:
+      -
+        DeviceName: /dev/sda1
+        Ebs:
+          VolumeSize: 80
+      SecurityGroupIds: !Ref SecurityGroupIds
+      SubnetId: !Ref SubnetId1
+      Tags:
+      - Key: Name
+        Value: !Sub "az-a-${AWS::StackName}"
+      UserData:
+        Fn::Base64: !Sub |
+          #cloud-config
+          hostname: az-a-${AWS::StackName}.aws.serviceNSW.com.au
+          manage_etc_hosts: true
+          runcmd:
+            - while ! curl --connect-timeout 1 -s http://169.254.169.254/ > /dev/null; do echo "-- waiting for instance network to wake up ..."; done
+            - IP=$(ifconfig eth0 | sed '2!d;s/.*addr:\([^ ]*\).*/\1/')
+            - sudo sed -i "s/localhost/$IP/" /opt/NSW-wtsgateway/conf/*
+            - /usr/local/bin/cfn-init -v --stack ${AWS::StackName} --resource Instance1 --region ${AWS::Region}
+            - sudo service awslogs restart
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Path: "/"
+      Roles: [ !Ref InstanceRole ]
+
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /application/
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Policies:
+      - PolicyName: create-log-stream
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Action:
+            - logs:CreateLogStream
+            - logs:CreateLogGroup
+            - logs:PutLogEvents
+            Resource: "*"
+      - PolicyName: cloudwatch-metrics
+        PolicyDocument:
+          Version: "2012-10-17"
+          Statement:
+          - Effect: Allow
+            Action:
+            - cloudwatch:PutMetricData
+            Resource: "*"
+
+  EIPAddress1:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref Instance1
+      AllocationId: !Ref FixedAlloc1
+
+DnsRecord:
+  Type: AWS::Route53::RecordSet
+  Properties:
+    HostedZoneName: !Ref ExternalZoneName
+    Name: !Sub "serviceNSW-web.${ExternalZoneName}"
+    Type: A
+    TTL: '300'
+    ResourceRecords:
+      - !GetAtt Instance.PublicIp
+
+  PrivateIpRecord1:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneName: aws.serviceNSW.com.au.
+      Name: !Sub "az-a-${AWS::StackName}.aws.serviceNSW.com.au."
+      Type: A
+      TTL: '900'
+      ResourceRecords:
+        - !GetAtt Instance1.PrivateIp
+
+
+  CPUAlarm1:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: !Sub "CPU alarm for az-a-${AWS::StackName}"
+      MetricName: CPUUtilization
+      Namespace: AWS/EC2
+      Statistic: Average
+      Period: '60'
+      EvaluationPeriods: '3'
+      Threshold: '90'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+      - Name: InstanceId1
+        Value: !Ref Instance1
+
+
+Outputs:
+  InstanceID1:
+    Value: !Ref Instance1
+
+  PrivateIP1:
+    Value: !GetAtt Instance1.PrivateIp
+
+  PrivateIP2:
+    Value: !GetAtt Instance2.PrivateIp

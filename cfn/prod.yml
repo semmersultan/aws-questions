@@ -1,0 +1,9 @@
+---
+InstanceType: m3.medium
+KeyPairName: automation
+VpcId: vpc-123456
+SubnetId1: subnet-1234
+SubnetId2: subnet-5678
+SecurityGroupIds: sg-1,sg-2,sg-3,sg-4
+FixedAlloc1: eipalloc-123
+FixedIP1: 1.2.3.4

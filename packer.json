@@ -1,0 +1,86 @@
+{
+  "builders": [
+    {
+      "ami_block_device_mappings": [
+        {
+          "delete_on_termination": true,
+          "device_name": "/dev/sda1",
+          "volume_size": 8,
+          "volume_type": "gp2"
+        }
+      ],
+      "ami_description": "{{user `app_name`}}",
+      "ami_name": "{{isotime | clean_ami_name}}",
+      "ami_users": [
+        "990839841794"
+      ],
+      "iam_instance_profile": "{{user `iam_profile`}}",
+      "instance_type": "m3.large",
+      "launch_block_device_mappings": [
+        {
+          "delete_on_termination": true,
+          "device_name": "/dev/sda1",
+          "volume_size": 8,
+          "volume_type": "gp2"
+        }
+      ],
+      "region": "ap-southeast-2",
+      "run_tags": {
+        "Name": "packer-build/{{ user `app_name` }}"
+      },
+      "source_ami": "{{user `ami_id`}}",
+      "ssh_pty": "true",
+      "ssh_username": "ubuntu",
+      "tags": {
+        "Application": "{{user `app_name`}}",
+        "Date": "{{isotime}}",
+        "Name": "{{user `app_name`}}-{{isotime | clean_ami_name}}",
+        "OS_Version": "Ubuntu 14.04 LTS"
+      },
+      "type": "amazon-ebs"
+    }
+  ],
+  "post-processors": [
+    {
+      "output": "/build/manifest.json",
+      "strip_path": true,
+      "type": "manifest"
+    }
+  ],
+  "provisioners": [
+    {
+      "type": "file",
+      "source": "/build/files/authorized_keys.sh",
+      "destination": "/tmp/authorized_keys.sh"
+    },
+    {
+      "type": "file",
+      "source": "/build/files/import_users.sh",
+      "destination": "/tmp/import_users.sh"
+    },
+    {
+      "type": "file",
+      "source": "/build/files/awslogs-apache.sh",
+      "destination": "/tmp/awslogs-apache.sh"
+    },
+    {
+      "script": "/build/files/bootstrap.sh",
+      "type": "shell"
+    },
+    {
+      "script": "/build/files/apps.sh",
+      "expect_disconnect": true,
+      "type": "shell"
+    },
+    {
+      "script": "/build/files/awslogs.sh",
+      "expect_disconnect": true,
+      "type": "shell"
+    }
+  ],
+"variables": {
+    "ami_id": "{{env `BASE_AMI_ID`}}",
+    "app_name": "{{env `APP_NAME`}}",
+    "iam_profile": "{{env `BUILD_IAM_PROFILE`}}"
+    }
+}
